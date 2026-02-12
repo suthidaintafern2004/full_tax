@@ -2,395 +2,448 @@
 session_start();
 require_once 'config.php';
 
-// ตรวจสอบสิทธิ์การเข้าใช้งาน (ต้อง Login ก่อน)
 if (!isset($_SESSION['username'])) {
     header("Location: login.php");
     exit();
 }
 
-// ดึงข้อมูลสิทธิ์ผู้ใช้งาน (Role)
-$user_role = 4; // ค่าเริ่มต้นเป็น User
+// 1. ตรวจสอบสถานะการเข้าใช้งานครั้งแรก
+$session_pid = $_SESSION['username'];
+$sql_check = "SELECT is_first_login FROM users WHERE username = ?";
+$stmt_check = mysqli_prepare($conn, $sql_check);
+mysqli_stmt_bind_param($stmt_check, "s", $session_pid);
+mysqli_stmt_execute($stmt_check);
+$res_check = mysqli_stmt_get_result($stmt_check);
+$user_status = mysqli_fetch_assoc($res_check);
+
+if ($user_status['is_first_login'] == 1) {
+    header("Location: setup_profile.php");
+    exit();
+}
+
+// 2. ตรวจสอบสิทธิ์ (Role)
+$user_role = 4;
 $sql_role = "SELECT role FROM users WHERE username = ?";
 $stmt_role = mysqli_prepare($conn, $sql_role);
-mysqli_stmt_bind_param($stmt_role, "s", $_SESSION['username']);
+mysqli_stmt_bind_param($stmt_role, "s", $session_pid);
 mysqli_stmt_execute($stmt_role);
 $result_role = mysqli_stmt_get_result($stmt_role);
 if ($row_role = mysqli_fetch_assoc($result_role)) {
     $user_role = $row_role['role'];
 }
 
+// ดึงชื่อผู้ใช้งานปัจจุบันสำหรับแสดงบน Navbar
+$current_user_display = "ผู้ใช้งาน";
+$sql_name = "SELECT m.fname, m.lname, p.prefix AS prefix_name 
+             FROM member m 
+             LEFT JOIN prefix p ON m.prefix = p.prefix_id 
+             WHERE m.pid = ?";
+$stmt_name = mysqli_prepare($conn, $sql_name);
+mysqli_stmt_bind_param($stmt_name, "s", $session_pid);
+mysqli_stmt_execute($stmt_name);
+$res_name = mysqli_stmt_get_result($stmt_name);
+if ($row_name = mysqli_fetch_assoc($res_name)) {
+    $current_user_display = $row_name['prefix_name'] . $row_name['fname'] . " " . $row_name['lname'];
+}
+
 $result_data = null;
 $admin_result = null;
-$error = "";
-$display_name = $_SESSION['username']; // ค่าเริ่มต้น
+$viewing_name = "";
+$selected_year = isset($_GET['filter_year']) ? $_GET['filter_year'] : '';
 
-if ($user_role == 3) {
-    $display_name = "Admin";
-    // --- ส่วนของ ADMIN ---
-    // ตั้งค่า Pagination
-    $limit = 50; // จำนวนรายการต่อหน้า
-    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+// --- [ADMIN VIEW - ตารางรายชื่อรวม] ---
+if ($user_role == 3 && !isset($_GET['view_pid'])) {
+    // ---- Pagination & Search ---
+    $limit = 50;
+    $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
     $start = ($page - 1) * $limit;
 
     $search_term = isset($_GET['search_pid']) ? trim($_GET['search_pid']) : "";
-
-    // Query พื้นฐาน: ใช้ UNION เพื่อรวม PID จากทั้งสองตารางเพื่อให้ได้รายชื่อครบถ้วน
-    $union_subquery = "(SELECT pid FROM combined_data UNION SELECT pid FROM tax_records)";
-
-    // เงื่อนไขการค้นหา
     $where_clause = "";
     $params = [];
     $types = "";
 
     if (!empty($search_term)) {
-        // ค้นหาจากทั้งชื่อใน combined_data และ tax_records
-        $where_clause = " WHERE main.pid LIKE ? OR c.fname LIKE ? OR c.lname LIKE ? OR t.fname LIKE ? OR t.lname LIKE ?";
+        $where_clause = " WHERE m.pid LIKE ? OR m.fname LIKE ? OR m.lname LIKE ? OR m.email LIKE ? OR r.role_name LIKE ?";
         $like_term = "%" . $search_term . "%";
         $params = [$like_term, $like_term, $like_term, $like_term, $like_term];
         $types = "sssss";
     }
 
-    // 1. หาจำนวนรายการทั้งหมด (Count)
-    $sql_count = "SELECT COUNT(*) as total FROM $union_subquery AS main 
-                  LEFT JOIN combined_data c ON main.pid = c.pid 
-                  LEFT JOIN tax_records t ON main.pid = t.pid 
-                  $where_clause";
-    
-    $stmt_count = mysqli_prepare($conn, $sql_count);
+    // Count total records
+    $sql_total = "SELECT COUNT(m.pid) as total FROM member m LEFT JOIN role r ON m.role_id = r.role_id $where_clause";
+    $stmt_total = mysqli_prepare($conn, $sql_total);
     if (!empty($types)) {
-        mysqli_stmt_bind_param($stmt_count, $types, ...$params);
+        mysqli_stmt_bind_param($stmt_total, $types, ...$params);
     }
-    mysqli_stmt_execute($stmt_count);
-    $result_count = mysqli_stmt_get_result($stmt_count);
-    $row_count = mysqli_fetch_assoc($result_count);
-    $total_records = $row_count['total'];
+    mysqli_stmt_execute($stmt_total);
+    $total_records = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt_total))['total'];
     $total_pages = ceil($total_records / $limit);
 
-    // 2. ดึงข้อมูลมาแสดง (Data)
-    $sql_data = "SELECT main.pid, 
-                        COALESCE(p.prefix, p2.prefix) AS prefix_name, 
-                        COALESCE(c.fname, t.fname) AS fname, 
-                        COALESCE(c.lname, t.lname) AS lname, 
-                        t.amount_paid, 
-                        t.tax_withheld 
-                 FROM $union_subquery AS main 
-                 LEFT JOIN combined_data c ON main.pid = c.pid 
-                 LEFT JOIN prefix p ON c.prefix = p.prefix_id 
-                 LEFT JOIN tax_records t ON main.pid = t.pid 
-                 LEFT JOIN prefix p2 ON t.prefix = p2.prefix_id 
+    // Fetch data for current page
+    $sql_data = "SELECT m.pid, p.prefix AS prefix_name, m.fname, m.lname, m.email, r.role_name, m.amount_paid, m.tax_withheld 
+                 FROM member m 
+                 LEFT JOIN prefix p ON m.prefix = p.prefix_id 
+                 LEFT JOIN role r ON m.role_id = r.role_id 
                  $where_clause 
-                 ORDER BY main.pid ASC 
+                 ORDER BY m.pid ASC
                  LIMIT ?, ?";
-
-    // เพิ่ม parameter สำหรับ LIMIT
-    $params[] = $start;
-    $params[] = $limit;
-    $types .= "ii";
-
     $stmt = mysqli_prepare($conn, $sql_data);
-    mysqli_stmt_bind_param($stmt, $types, ...$params);
+    if (!empty($types)) {
+        $types .= "ii";
+        $params[] = $start;
+        $params[] = $limit;
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    } else {
+        mysqli_stmt_bind_param($stmt, "ii", $start, $limit);
+    }
     mysqli_stmt_execute($stmt);
     $admin_result = mysqli_stmt_get_result($stmt);
-
 } else {
-    // --- ส่วนของ USER ---
-    // ค้นหาข้อมูลของตัวเองเท่านั้น
-    $search_pid = $_SESSION['username'];
+    // --- [USER VIEW / ADMIN VIEW SINGLE - ข้อมูลรายบุคคล] ---
+    $search_pid = ($user_role == 3 && isset($_GET['view_pid'])) ? $_GET['view_pid'] : $session_pid;
 
-    // ดึงข้อมูลจาก combined_data และ join กับ prefix เพื่อเอาคำนำหน้า
-    // และ left join กับ tax_records เพื่อเอารายได้และภาษี (ถ้ามี)
-    $sql = "SELECT c.pid, p.prefix AS prefix_name, c.fname, c.lname, t.amount_paid, t.tax_withheld 
-            FROM combined_data c 
-            LEFT JOIN prefix p ON c.prefix = p.prefix_id 
-            LEFT JOIN tax_records t ON c.pid = t.pid 
-            WHERE c.pid = ?";
-    
+    $sql = "SELECT m.pid, p.prefix AS prefix_name, m.fname, m.lname, m.email, r.role_name, m.amount_paid, m.tax_withheld 
+            FROM member m 
+            LEFT JOIN prefix p ON m.prefix = p.prefix_id 
+            LEFT JOIN role r ON m.role_id = r.role_id 
+            WHERE m.pid = ?";
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param($stmt, "s", $search_pid);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
-
-    if (mysqli_num_rows($result) > 0) {
-        $result_data = mysqli_fetch_assoc($result);
-    } else {
-        // กรณีไม่เจอใน combined_data ลองหาใน tax_records โดยตรง
-        $sql = "SELECT t.pid, p.prefix AS prefix_name, t.fname, t.lname, t.amount_paid, t.tax_withheld 
-                    FROM tax_records t
-                    LEFT JOIN prefix p ON t.prefix = p.prefix_id
-                    WHERE t.pid = ?";
-        $stmt = mysqli_prepare($conn, $sql);
-        mysqli_stmt_bind_param($stmt, "s", $search_pid);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
-        
-        if (mysqli_num_rows($result) > 0) {
-            $result_data = mysqli_fetch_assoc($result);
-        } else {
-            $error = "ไม่พบข้อมูลของคุณในระบบ";
-        }
+    if ($row_data = mysqli_fetch_assoc($result)) {
+        $result_data = $row_data;
+        $viewing_name = ($result_data['prefix_name'] ?? '') . $result_data['fname'] . ' ' . $result_data['lname'];
     }
 
-    // --- ส่วนดึงข้อมูลเอกสารสำหรับ User ---
-    // 1. ดึงรายการหนังสือรับรองการหักภาษี ณ ที่จ่าย (processed_PDFs) จากตาราง tax_reports
+    // จัดการปีและไฟล์ PDF
+    $available_years = [];
+    $like_pattern = $search_pid . '-%';
+    $query_years = ["SELECT file_name FROM tax_reports WHERE file_name LIKE ?", "SELECT file_name FROM pdf_management WHERE file_name LIKE ?"];
+    foreach ($query_years as $sql_y) {
+        $stmt_y = mysqli_prepare($conn, $sql_y);
+        mysqli_stmt_bind_param($stmt_y, "s", $like_pattern);
+        mysqli_stmt_execute($stmt_y);
+        $res_y = mysqli_stmt_get_result($stmt_y);
+        while ($y_row = mysqli_fetch_assoc($res_y)) {
+            $parts = explode('-', pathinfo($y_row['file_name'], PATHINFO_FILENAME));
+            if (isset($parts[3]) && strlen($parts[3]) >= 2) {
+                $yr = substr($parts[3], 0, 2);
+                if (!in_array($yr, $available_years)) $available_years[] = $yr;
+            }
+        }
+    }
+    rsort($available_years);
+
     $tax_reports_list = [];
-    $sql_reports = "SELECT * FROM tax_reports WHERE pid = ? ORDER BY id ASC";
-    $stmt_reports = mysqli_prepare($conn, $sql_reports);
-    mysqli_stmt_bind_param($stmt_reports, "s", $search_pid);
-    mysqli_stmt_execute($stmt_reports);
-    $result_reports = mysqli_stmt_get_result($stmt_reports);
-    while ($row = mysqli_fetch_assoc($result_reports)) {
+    $pdf_deduction_list = [];
+    $year_suffix = !empty($selected_year) ? "%-" . $selected_year . ".pdf" : ".pdf";
+    $search_filter = $search_pid . "-%" . $year_suffix;
+
+    $sql_r = "SELECT file_name FROM tax_reports WHERE file_name LIKE ? ORDER BY file_name DESC";
+        $stmt_r = mysqli_prepare($conn, $sql_r);
+    mysqli_stmt_bind_param($stmt_r, "s", $search_filter);
+    mysqli_stmt_execute($stmt_r);
+    $res_r = mysqli_stmt_get_result($stmt_r);
+    while ($row = mysqli_fetch_assoc($res_r)) {
         $tax_reports_list[] = $row;
     }
 
-    // เรียงลำดับตาม วัน เดือน ปี (จากน้อยไปมาก)
-    usort($tax_reports_list, function($a, $b) {
-        $parts_a = explode('-', $a['file_name']);
-        $parts_b = explode('-', $b['file_name']);
+    $sql_p = "SELECT file_name FROM pdf_management WHERE file_name LIKE ? ORDER BY file_name DESC";
+        $stmt_p = mysqli_prepare($conn, $sql_p);
+    mysqli_stmt_bind_param($stmt_p, "s", $search_filter);
+    mysqli_stmt_execute($stmt_p);
+    $res_p = mysqli_stmt_get_result($stmt_p);
+    while ($row = mysqli_fetch_assoc($res_p)) {
+        $pdf_deduction_list[] = $row;
+    }
 
-        // ตรวจสอบว่ามีข้อมูลครบถ้วนหรือไม่ (ป้องกัน error)
-        if (count($parts_a) < 4 || count($parts_b) < 4) {
-            return 0;
-        }
-
-        $day_a = (int)$parts_a[1];
-        $month_a = (int)$parts_a[2];
-        $year_a = (int)$parts_a[3];
-
-        $day_b = (int)$parts_b[1];
-        $month_b = (int)$parts_b[2];
-        $year_b = (int)$parts_b[3];
-
+    // ฟังก์ชันจัดเรียงวันที่จากชื่อไฟล์ (เรียงจากล่าสุดไปเก่าสุด)
+    $date_sort = function($a, $b) {
+        $pa = explode('-', pathinfo($a['file_name'], PATHINFO_FILENAME));
+        $pb = explode('-', pathinfo($b['file_name'], PATHINFO_FILENAME));
+        
         // เปรียบเทียบ ปี -> เดือน -> วัน
-        if ($year_a !== $year_b) {
-            return $year_a - $year_b;
-        }
-        if ($month_a !== $month_b) {
-            return $month_a - $month_b;
-        }
-        return $day_a - $day_b;
-    });
-
-    // 2. ดึงเอกสารลดหย่อนภาษี (pdf_storage) จากตาราง pdf_management
-    $pdf_deduction = null;
-    $sql_pdf = "SELECT * FROM pdf_management WHERE pid = ?";
-    $stmt_pdf = mysqli_prepare($conn, $sql_pdf);
-    mysqli_stmt_bind_param($stmt_pdf, "s", $search_pid);
-    mysqli_stmt_execute($stmt_pdf);
-    $result_pdf = mysqli_stmt_get_result($stmt_pdf);
-    if ($row = mysqli_fetch_assoc($result_pdf)) {
-        $pdf_deduction = $row;
-    }
-
-    if ($result_data) {
-        $prefix = $result_data['prefix_name'] ?? '';
-        $display_name = $prefix . $result_data['fname'] . ' ' . $result_data['lname'];
-    }
+        $ya = isset($pa[3]) ? (int)$pa[3] : 0;
+        $yb = isset($pb[3]) ? (int)$pb[3] : 0;
+        if ($ya != $yb) return $yb - $ya;
+        
+        $ma = isset($pa[2]) ? (int)$pa[2] : 0;
+        $mb = isset($pb[2]) ? (int)$pb[2] : 0;
+        if ($ma != $mb) return $mb - $ma;
+        
+        $da = isset($pa[1]) ? (int)$pa[1] : 0;
+        $db = isset($pb[1]) ? (int)$pb[1] : 0;
+        return $db - $da;
+    };
+    usort($tax_reports_list, $date_sort);
+    usort($pdf_deduction_list, $date_sort);
 }
+
+$thai_months = [1 => 'มกราคม', 2 => 'กุมภาพันธ์', 3 => 'มีนาคม', 4 => 'เมษายน', 5 => 'พฤษภาคม', 6 => 'มิถุนายน', 7 => 'กรกฎาคม', 8 => 'สิงหาคม', 9 => 'กันยายน', 10 => 'ตุลาคม', 11 => 'พฤศจิกายน', 12 => 'ธันวาคม'];
 ?>
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ค้นหารายชื่อ - ระบบภาษี</title>
+    <title>ระบบจัดการภาษี</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #4e73df;
+        }
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url('images/bg.jpg') no-repeat center center fixed;
+            background-size: cover;
+            filter: blur(8px);
+            z-index: -1;
+            transform: scale(1.1);
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
+        }
+
+        /* ขยายหน้าจอให้กว้างขึ้น */
+        .content-wrapper {
+            max-width: 1320px;
+            margin: 0 auto;
+            width: 95%;
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+        }
+
+        .amount-text {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+
+        .doc-section-title {
+            border-left: 4px solid var(--primary-color);
+            padding-left: 10px;
+            margin: 20px 0 15px 0;
+            font-weight: 600;
+        }
+        .pagination .page-link {
+            border-radius: 50px !important;
+            margin: 0 4px;
+            border: none;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            color: var(--primary-color);
+        }
+        .pagination .page-item.active .page-link {
+            background: var(--primary-color);
+            color: white;
+        }
+    </style>
 </head>
-<body class="bg-light">
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="index.php">ระบบภาษี</a>
-            <div class="d-flex align-items-center">
-                <span class="text-white me-3">ผู้ใช้งาน: <?php echo htmlspecialchars($display_name); ?></span>
-                <a href="logout.php" class="btn btn-danger btn-sm">ออกจากระบบ</a>
+
+<body class="d-flex flex-column min-vh-100">
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4 shadow-sm">
+        <div class="container content-wrapper">
+            <a class="navbar-brand" href="index.php"><i class="fas fa-file-invoice-dollar me-2"></i>ระบบดาวน์โหลดเอกสารรับรองภาษี</a>
+            <div class="ms-auto d-flex align-items-center">
+                <?php if ($user_role == 3): ?>
+                    <a href="admin_menu.php" class="btn btn-light btn-sm me-2 rounded-pill text-primary px-3"><i class="fas fa-th-large me-1"></i> เมนูแอดมิน</a>
+                <?php else: ?>
+                    <a href="profile.php" class="btn btn-outline-light btn-sm rounded-pill px-3 me-2" title="แก้ไขข้อมูลส่วนตัว">
+                        <i class="fas fa-user-circle me-1"></i> <?php echo htmlspecialchars($current_user_display); ?>
+                    </a>
+                <?php endif; ?>
+                <a href="logout.php" class="btn btn-outline-light btn-sm rounded-pill px-3"><i class="fas fa-sign-out-alt me-1"></i> ออกจากระบบ</a>
             </div>
         </div>
     </nav>
 
-    <div class="container">
+    <div class="container content-wrapper">
         <div class="row justify-content-center">
-            <div class="col-md-10">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-white">
-                        <h4 class="text-center mb-0"><?php echo ($user_role == 3) ? 'รายการข้อมูลผู้เสียภาษี' : 'ข้อมูลส่วนตัว'; ?></h4>
+            <div class="col-lg-11 col-xl-11">
+                <div class="card shadow-sm mb-5">
+                    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
+                        <h5 class="mb-0 text-primary fw-bold">
+                            <?php echo ($user_role == 3 && !isset($_GET['view_pid'])) ? '<i class="fas fa-list-ul me-2"></i>รายชื่อบุคลากร' : '<i class="fas fa-user-check me-2"></i>ข้อมูลภาษีส่วนบุคคล'; ?>
+                        </h5>
+                        <?php if (isset($_GET['view_pid'])): ?><a href="index.php" class="btn btn-secondary btn-sm px-4">กลับ</a><?php endif; ?>
                     </div>
-                    <div class="card-body">
-                        
-                        <?php if ($user_role == 3): ?>
-                            <!-- ส่วนแสดงผลสำหรับ Admin -->
-                            <form method="get" action="" class="mb-4">
-                                <div class="input-group">
-                                    <input type="text" class="form-control" name="search_pid" placeholder="ค้นหาด้วย เลขบัตรฯ หรือ ชื่อ-นามสกุล" value="<?php echo htmlspecialchars($search_term); ?>">
-                                    <button class="btn btn-primary" type="submit">ค้นหา</button>
-                                    <a href="index.php" class="btn btn-secondary">ล้างค่า</a>
+                    <div class="card-body p-4">
+
+                        <?php if ($user_role == 3 && !isset($_GET['view_pid'])): ?>
+                            <form method="get" class="mb-4 d-flex justify-content-end">
+                                <div class="input-group" style="max-width: 400px;">
+                                    <input type="text" class="form-control" name="search_pid" placeholder="ค้นชื่อ, อีเมล หรือตำแหน่ง..." value="<?php echo htmlspecialchars($search_term ?? ''); ?>">
+                                    <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i></button>
                                 </div>
                             </form>
-
-                            <div class="mb-2 text-end text-muted">พบข้อมูลทั้งหมด <?php echo number_format($total_records); ?> รายการ</div>
-
                             <div class="table-responsive">
-                                <table class="table table-bordered table-hover">
+                                <table class="table table-hover align-middle">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>เลขบัตรประชาชน</th>
                                             <th>ชื่อ-นามสกุล</th>
-                                            <th class="text-end">รายได้ (บาท)</th>
-                                            <th class="text-end">ภาษีที่หัก (บาท)</th>
+                                            <th>อีเมล (ติดต่อ)</th>
+                                            <th>ตำแหน่ง</th>
+                                            <th class="text-end">รายได้สะสม (฿)</th>
+                                            <th class="text-end">ภาษีหักสะสม (฿)</th>
+                                            <th class="text-center">ดูเอกสาร</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if ($admin_result && mysqli_num_rows($admin_result) > 0): ?>
-                                            <?php while ($row = mysqli_fetch_assoc($admin_result)): ?>
+                                        <?php if ($admin_result): while ($row = mysqli_fetch_assoc($admin_result)): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($row['pid']); ?></td>
-                                                    <td>
-                                                        <?php 
-                                                        $prefix = $row['prefix_name'] ?? '';
-                                                        echo htmlspecialchars($prefix . $row['fname'] . ' ' . $row['lname']); 
-                                                        ?>
-                                                    </td>
-                                                    <td class="text-end text-success"><?php echo number_format($row['amount_paid'], 2); ?></td>
-                                                    <td class="text-end text-danger"><?php echo number_format($row['tax_withheld'], 2); ?></td>
+                                                    <td><strong><?php echo htmlspecialchars($row['prefix_name'] . $row['fname'] . ' ' . $row['lname']); ?></strong></td>
+                                                    <td class="text-muted small"><?php echo htmlspecialchars($row['email'] ?? '-'); ?></td>
+                                                    <td><span class="badge bg-light text-primary border fw-normal"><?php echo htmlspecialchars($row['role_name'] ?? 'บุคลากร'); ?></span></td>
+                                                    <td class="text-end text-success amount-text"><?php echo number_format($row['amount_paid'], 2); ?></td>
+                                                    <td class="text-end text-danger amount-text"><?php echo number_format($row['tax_withheld'], 2); ?></td>
+                                                    <td class="text-center"><a href="index.php?view_pid=<?php echo htmlspecialchars($row['pid']); ?>" class="btn btn-outline-info btn-sm px-3"><i class="fas fa-eye"></i></a></td>
                                                 </tr>
-                                            <?php endwhile; ?>
-                                        <?php else: ?>
-                                            <tr>
-                                                <td colspan="4" class="text-center text-muted">ไม่พบข้อมูล</td>
-                                            </tr>
-                                        <?php endif; ?>
+                                        <?php endwhile;
+                                        endif; ?>
                                     </tbody>
                                 </table>
                             </div>
 
-                            <!-- Pagination -->
-                            <?php if ($total_pages > 1): ?>
-                            <nav aria-label="Page navigation">
-                                <ul class="pagination justify-content-center mt-3">
-                                    <li class="page-item <?php if($page <= 1) echo 'disabled'; ?>">
-                                        <a class="page-link" href="?page=<?php echo $page-1; ?>&search_pid=<?php echo urlencode($search_term); ?>">ก่อนหน้า</a>
+                            <?php if (isset($total_pages) && $total_pages > 1): ?>
+                            <nav class="mt-4">
+                                <ul class="pagination justify-content-center">
+                                    <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
+                                        <a class="page-link" href="?page=<?php echo $page - 1; ?>&search_pid=<?php echo urlencode($search_term); ?>"><i class="fas fa-chevron-left"></i></a>
                                     </li>
-                                    
-                                    <li class="page-item disabled">
-                                        <span class="page-link">หน้า <?php echo $page; ?> จาก <?php echo $total_pages; ?></span>
-                                    </li>
-
-                                    <li class="page-item <?php if($page >= $total_pages) echo 'disabled'; ?>">
-                                        <a class="page-link" href="?page=<?php echo $page+1; ?>&search_pid=<?php echo urlencode($search_term); ?>">ถัดไป</a>
+                                    <?php
+                                    $range = 2;
+                                    for ($i = 1; $i <= $total_pages; $i++) {
+                                        if ($i == 1 || $i == $total_pages || ($i >= $page - $range && $i <= $page + $range)) {
+                                            echo '<li class="page-item ' . ($page == $i ? 'active' : '') . '"><a class="page-link" href="?page=' . $i . '&search_pid=' . urlencode($search_term) . '">' . $i . '</a></li>';
+                                        } elseif ($i == $page - $range - 1 || $i == $page + $range + 1) {
+                                            echo '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                                        }
+                                    } ?>
+                                    <li class="page-item <?php echo ($page >= $total_pages) ? 'disabled' : ''; ?>">
+                                        <a class="page-link" href="?page=<?php echo $page + 1; ?>&search_pid=<?php echo urlencode($search_term); ?>"><i class="fas fa-chevron-right"></i></a>
                                     </li>
                                 </ul>
                             </nav>
                             <?php endif; ?>
+                            </div>
                         <?php endif; ?>
 
-                        <?php if ($error): ?>
-                            <div class="alert alert-danger text-center"><?php echo $error; ?></div>
-                        <?php endif; ?>
-
-                        <?php if ($user_role != 3 && $result_data): ?>
-                            <!-- ส่วนแสดงผลสำหรับ User -->
-                            <div class="card mt-4 border-info">
-                                <div class="card-header bg-info text-white">
-                                    ข้อมูลผู้เสียภาษี
-                                </div>
-                                <div class="card-body">
-                                    <div class="row mb-2">
-                                        <div class="col-sm-4 fw-bold">ชื่อ-นามสกุล:</div>
-                                        <div class="col-sm-8">
-                                            <?php 
-                                            $prefix = $result_data['prefix_name'] ?? '';
-                                            echo htmlspecialchars($prefix . $result_data['fname'] . ' ' . $result_data['lname']); 
-                                            ?>
+                        <?php if (($user_role != 3 || isset($_GET['view_pid'])) && $result_data): ?>
+                            <div class="bg-light p-4 rounded-3 border mb-4 shadow-sm">
+                                <div class="row align-items-center">
+                                    <div class="col-md-8">
+                                        <h4 class="fw-bold mb-1 text-dark"><?php echo htmlspecialchars($viewing_name); ?></h4>
+                                        <div class="mb-2">
+                                            <span class="badge bg-primary me-2"><i class="fas fa-briefcase me-1"></i> <?php echo htmlspecialchars($result_data['role_name'] ?? 'บุคลากร'); ?></span>
+                                            <span class="text-muted small"><i class="fas fa-envelope me-1"></i> <?php echo htmlspecialchars($result_data['email'] ?? '-'); ?></span>
                                         </div>
+                                        <p class="text-muted small mb-0">Username: <?php echo substr($result_data['pid'], 0, 1) . "XXXXX" . substr($result_data['pid'], -4); ?></p>
                                     </div>
-                                    
-                                    <hr>
-                                    
-                                    <?php if (isset($result_data['amount_paid']) && !is_null($result_data['amount_paid'])): ?>
-                                        <h5 class="text-success">ข้อมูลรายได้และภาษี</h5>
-                                        <div class="row mb-2">
-                                            <div class="col-sm-4 fw-bold">รายได้ (Amount Paid):</div>
-                                            <div class="col-sm-8 text-success fw-bold"><?php echo number_format($result_data['amount_paid'], 2); ?> บาท</div>
-                                        </div>
-                                        <div class="row mb-2">
-                                            <div class="col-sm-4 fw-bold">ภาษีที่หัก (Tax Withheld):</div>
-                                            <div class="col-sm-8 text-danger fw-bold"><?php echo number_format($result_data['tax_withheld'], 2); ?> บาท</div>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="alert alert-warning mb-0">
-                                            ไม่พบข้อมูลรายได้และภาษีในระบบ (ตาราง tax_records)
-                                        </div>
-                                    <?php endif; ?>
+                                    <div class="col-md-4 text-md-end mt-3 mt-md-0">
+                                        <form method="get">
+                                            <?php if (isset($_GET['view_pid'])): ?><input type="hidden" name="view_pid" value="<?php echo htmlspecialchars($_GET['view_pid']); ?>"><?php endif; ?>
+                                            <select name="filter_year" class="form-select" onchange="this.form.submit()">
+                                                <option value="">ปี พ.ศ. ทั้งหมด</option>
+                                                <?php foreach ($available_years as $yr): ?><option value="<?php echo $yr; ?>" <?php echo ($selected_year == $yr) ? 'selected' : ''; ?>>25<?php echo $yr; ?></option><?php endforeach; ?>
+                                            </select>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
 
-                                    <hr>
-                                    
-                                    <!-- ส่วนแสดงเอกสารใบหักภาษี ณ ที่จ่าย -->
-                                    <h5 class="text-primary mt-4">หนังสือรับรองการหักภาษี ณ ที่จ่าย</h5>
-                                    <?php if (!empty($tax_reports_list)): ?>
-                                        <div class="table-responsive">
-                                            <table class="table table-bordered table-striped">
-                                                <thead class="table-light">
-                                                    <tr>
-                                                        <th>วันที่ออกเอกสาร</th>
-                                                        <th class="text-center">เอกสาร</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <?php 
-                                                    $thai_months = [
-                                                        1 => 'มกราคม', 2 => 'กุมภาพันธ์', 3 => 'มีนาคม', 4 => 'เมษายน',
-                                                        5 => 'พฤษภาคม', 6 => 'มิถุนายน', 7 => 'กรกฎาคม', 8 => 'สิงหาคม',
-                                                        9 => 'กันยายน', 10 => 'ตุลาคม', 11 => 'พฤศจิกายน', 12 => 'ธันวาคม'
-                                                    ];
-                                                    foreach ($tax_reports_list as $report): ?>
-                                                        <?php
-                                                            // แยกชื่อไฟล์เพื่อเอา วันที่-เดือน-ปี
-                                                            // รูปแบบ: เลขบัตร - วันที่ - เดือน - ปี - เลขหน้า.pdf
-                                                            $filename = $report['file_name'];
-                                                            $parts = explode('-', $filename);
-                                                            // $parts[0] = PID, [1] = วันที่, [2] = เดือน, [3] = ปี (2 หลัก)
-                                                            $day = isset($parts[1]) ? (int)$parts[1] : '-';
-                                                            $month_num = isset($parts[2]) ? (int)$parts[2] : 0;
-                                                            $month_name = $thai_months[$month_num] ?? '-';
-                                                            $year = isset($parts[3]) ? '25' . $parts[3] : '-';
-                                                            
-                                                            $full_date = "$day $month_name $year";
-                                                        ?>
-                                                        <tr>
-                                                            <td><?php echo htmlspecialchars($full_date); ?></td>
-                                                            <td class="text-center">
-                                                                <a href="PDF/processed_PDFs/<?php echo htmlspecialchars($filename); ?>" target="_blank" class="btn btn-sm btn-primary">
-                                                                    ดูเอกสาร
-                                                                </a>
-                                                            </td>
-                                                        </tr>
-                                                    <?php endforeach; ?>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="alert alert-secondary">ไม่พบเอกสารใบหักภาษี</div>
-                                    <?php endif; ?>
+                            <div class="row g-4 mb-4">
+                                <div class="col-md-6">
+                                    <div class="card h-100 border-start border-success border-4 py-3 px-4 shadow-sm">
+                                        <small class="text-success fw-bold text-uppercase">รายได้รวมสะสม</small>
+                                        <h2 class="amount-text mb-0 mt-1">฿ <?php echo number_format($result_data['amount_paid'], 2); ?></h2>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card h-100 border-start border-danger border-4 py-3 px-4 shadow-sm">
+                                        <small class="text-danger fw-bold text-uppercase">ภาษีหัก ณ ที่จ่าย</small>
+                                        <h2 class="amount-text mb-0 mt-1">฿ <?php echo number_format($result_data['tax_withheld'], 2); ?></h2>
+                                    </div>
+                                </div>
+                            </div>
 
-                                    <!-- ส่วนแสดงเอกสารลดหย่อนภาษี -->
-                                    <h5 class="text-primary mt-4">เอกสารลดหย่อนภาษี</h5>
-                                    <?php if ($pdf_deduction): ?>
-                                        <div class="mt-2">
-                                            <a href="PDF/pdf_storage/<?php echo htmlspecialchars($pdf_deduction['newname']); ?>" target="_blank" class="btn btn-success">
-                                                ดูเอกสารลดหย่อนภาษี
-                                            </a>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="alert alert-secondary">ไม่พบเอกสารลดหย่อนภาษี</div>
-                                    <?php endif; ?>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h5 class="doc-section-title text-primary"><i class="fas fa-file-pdf text-danger me-2"></i>เอกสารหักภาษี ณ ที่จ่าย</h5>
+                                    <div class="list-group shadow-sm">
+                                        <?php if (!empty($tax_reports_list)): 
+                                            $current_year = null;
+                                            foreach ($tax_reports_list as $r):
+                                                $p = explode('-', pathinfo($r['file_name'], PATHINFO_FILENAME));
+                                                $ds = (isset($p[1]) ? (int)$p[1] : '-') . " " . ($thai_months[(int)($p[2] ?? 0)] ?? '-') . " " . (isset($p[3]) ? '25' . $p[3] : '-'); ?>
+                                                 
+                                                <?php 
+                                                    $year = isset($p[3]) ? '25' . $p[3] : '-';
+                                                    if ($year != $current_year): 
+                                                        if ($current_year != null) echo '<hr class="my-2">'; // เส้นคั่นปี (ยกเว้นปีแรก)
+                                                        echo '<h6 class="text-muted fw-bold">ปี ' . $year . '</h6>';
+                                                        $current_year = $year;
+                                                    endif; 
+                                                ?>
+
+                                                <a href="view_pdf.php?file=<?php echo htmlspecialchars($r['file_name']); ?>" target="_blank" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                                    <span><?php echo $ds; ?></span><i class="fas fa-file-download text-muted"></i>
+                                                </a>
+                                        <?php endforeach;
+                                        else: ?><div class="list-group-item text-muted text-center py-3">ไม่มีข้อมูลเอกสาร</div><?php endif; ?>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+
+                                    <h5 class="doc-section-title text-success"><i class="fas fa-file-invoice text-success me-2"></i>เอกสารลดหย่อนภาษีอื่นๆ</h5>
+                                    <div class="list-group shadow-sm">
+                                        <?php if (!empty($pdf_deduction_list)): 
+                                            $current_year_deduct = null;
+                                            foreach ($pdf_deduction_list as $pdf):
+                                                $p = explode('-', pathinfo($pdf['file_name'], PATHINFO_FILENAME));
+                                                $ds = (isset($p[1]) ? (int)$p[1] : '-') . " " . ($thai_months[(int)($p[2] ?? 0)] ?? '-') . " " . (isset($p[3]) ? '25' . $p[3] : '-'); 
+                                                
+                                                $year = isset($p[3]) ? '25' . $p[3] : '-';
+                                                if ($year != $current_year_deduct): 
+                                                    if ($current_year_deduct != null) echo '<hr class="my-2">';
+                                                    echo '<h6 class="text-muted fw-bold">ปี ' . $year . '</h6>';
+                                                    $current_year_deduct = $year;
+                                                endif;
+                                                ?>
+                                                <a href="PDF/pdf_storage/<?php echo htmlspecialchars($pdf['file_name']); ?>" target="_blank" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                                    <span><?php echo $ds; ?></span><i class="fas fa-external-link-alt text-muted"></i>
+                                                </a>
+                                            <?php endforeach;
+                                        else: ?><div class="list-group-item text-muted text-center py-3">ไม่มีข้อมูลเอกสาร</div><?php endif; ?>
+                                    </div>
                                 </div>
                             </div>
                         <?php endif; ?>
+
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
+    <?php include 'footer.php'; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
+
 </html>
