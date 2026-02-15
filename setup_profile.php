@@ -1,13 +1,7 @@
 <?php
 session_start();
 require_once 'config.php';
-
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
-require 'PHPMailer/src/Exception.php';
-require 'PHPMailer/src/PHPMailer.php';
-require 'PHPMailer/src/SMTP.php';
+require_once 'send_otp_mail.php';
 
 // ตรวจสอบการตั้งค่า OTP
 $use_otp = true;
@@ -49,28 +43,10 @@ if ($use_otp && isset($_POST['action']) && $_POST['action'] == 'request_otp') {
             'expiry' => time() + 300
         ];
 
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host       = 'smtp.gmail.com';
-            $mail->SMTPAuth   = true;
-            $mail->Username   = 'tax_finance@sesalpglpn.go.th';
-            $mail->Password   = 'hgtxhqcpmmnuahng';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port       = 587;
-            $mail->CharSet    = 'UTF-8';
-
-            $mail->setFrom('tax_finance@sesalpglpn.go.th', 'ระบบภาษี SESALPGLPN');
-            $mail->addAddress($email);
-            $mail->isHTML(true);
-            $mail->Subject = "รหัส OTP ของคุณคือ $otp_code (Ref: $ref_code)";
-            $mail->Body    = "รหัสยืนยันคือ: <b style='font-size:24px; color:red;'>$otp_code</b>";
-
-            if ($mail->send()) {
-                $show_otp_modal = true; // ตั้งค่าให้เด้ง Modal เมื่อส่งเมลสำเร็จ
-            }
-        } catch (Exception $e) {
-            $error = "ส่งอีเมลไม่สำเร็จ: " . $mail->ErrorInfo;
+        if (sendOtpEmail($email, $otp_code, 'first_login', $ref_code)) {
+            $show_otp_modal = true; // ตั้งค่าให้เด้ง Modal เมื่อส่งเมลสำเร็จ
+        } else {
+            $error = "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
         }
     }
 }
@@ -147,66 +123,7 @@ if (!$use_otp && isset($_POST['action']) && $_POST['action'] == 'save_password_n
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            background: #f4f7f6;
-            font-family: 'Sarabun', sans-serif;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-        }
-
-        .card {
-            border: none;
-            border-radius: 15px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-        }
-
-        .btn-request {
-            background: #ff5e5e;
-            color: white;
-            border-radius: 50px;
-            padding: 10px;
-            border: none;
-            font-weight: 600;
-        }
-
-        .btn-request:hover {
-            background: #e04b4b;
-        }
-
-        /* สไตล์ช่อง OTP แบบในรูป */
-        .otp-digit {
-            width: 45px;
-            height: 50px;
-            border: 1px solid #ced4da;
-            text-align: center;
-            font-size: 20px;
-            font-weight: bold;
-            margin: 0 5px;
-            border-radius: 5px;
-        }
-
-        .otp-digit:focus {
-            border-color: #ff5e5e;
-            outline: none;
-            box-shadow: 0 0 5px rgba(255, 94, 94, 0.3);
-        }
-
-        .modal-content {
-            border-radius: 20px;
-            border: none;
-        }
-
-        .btn-verify {
-            background: #ff5e5e;
-            color: white;
-            border-radius: 8px;
-            width: 150px;
-            padding: 10px;
-            border: none;
-        }
-    </style>
+    <link rel="stylesheet" href="css/setup_profile.css">
 </head>
 
 <body>

@@ -41,7 +41,7 @@ function sendOtpEmail($email, $otp, $type, $ref)
         $mail->Port       = 587;
         $mail->CharSet    = 'UTF-8';
 
-        $mail->setFrom('tax_finance@sesalpglpn.go.th', 'ระบบภาษี SESALPGLPN');
+        $mail->setFrom('tax_finance@sesalpglpn.go.th', 'งานภาษี กลุ่มการเงิน สพม.ลำปาง ลำพูน');
         $mail->addAddress($email);
         $mail->isHTML(true);
         $mail->Subject = "รหัส OTP (Ref: $ref)";
@@ -52,7 +52,7 @@ function sendOtpEmail($email, $otp, $type, $ref)
         <body style='font-family: Arial; background:#f4f4f4; padding:20px;'>
             <div style='max-width:600px;margin:auto;background:#fff;border-radius:10px;overflow:hidden'>
                 <div style='background:#4b0082;padding:20px;text-align:center'>
-                    <h2 style='color:#fff;margin:0'>ระบบภาษี SESALPGLPN</h2>
+                    <h2 style='color:#fff;margin:0'>ระบบดาวน์โหลดเอกสารรับรองภาษี</h2>
                 </div>
                 <div style='padding:30px;text-align:center'>
                     <h3>$title</h3>
@@ -67,7 +67,7 @@ function sendOtpEmail($email, $otp, $type, $ref)
                     <p style='color:#999'>รหัสนี้มีอายุ 5 นาที</p>
                 </div>
                 <div style='background:#eee;padding:10px;text-align:center;font-size:12px;color:#666'>
-                    © ระบบภาษี SESALPGLPN
+                    © " . date("Y") . " ระบบดาวน์โหลดเอกสารรับรองภาษีของบุคคลากรในเขต สพม.ลำปาง ลำพูน
                 </div>
             </div>
         </body>

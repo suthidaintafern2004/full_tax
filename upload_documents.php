@@ -235,69 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            font-family: 'Sarabun', sans-serif;
-            background-color: #f0f2f5;
-            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
-            background-size: 20px 20px;
-        }
-        .navbar { background: linear-gradient(135deg, #4e73df 0%, #224abe 100%); }
-        
-        .card-upload {
-            border: none;
-            border-radius: 24px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            overflow: hidden;
-        }
-        
-        .card-header-custom {
-            background: linear-gradient(to right, #4e73df, #36b9cc);
-            color: white;
-            padding: 25px;
-            text-align: center;
-        }
-
-        .upload-area {
-            border: 2px dashed #cbd5e0;
-            border-radius: 20px;
-            padding: 50px 20px;
-            text-align: center;
-            background: #f8fafc;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            position: relative;
-        }
-        .upload-area:hover, .upload-area.dragover {
-            border-color: #4e73df;
-            background: #edf2f7;
-            transform: scale(1.01);
-        }
-        .upload-icon {
-            font-size: 4rem;
-            color: #a0aec0;
-            transition: 0.3s;
-        }
-        .upload-area:hover .upload-icon {
-            color: #4e73df;
-            transform: translateY(-5px);
-        }
-        
-        .btn-upload {
-            background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
-            border: none;
-            padding: 12px 30px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: 0.3s;
-        }
-        .btn-upload:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(78, 115, 223, 0.4);
-        }
-    </style>
+    <link rel="stylesheet" href="css/upload_documents.css">
 </head>
 <body class="d-flex flex-column min-vh-100">
     <nav class="navbar navbar-expand-lg navbar-dark mb-5 shadow-sm">

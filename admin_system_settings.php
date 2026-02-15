@@ -24,11 +24,22 @@ if ($user['role'] != 3) {
 $settings_file = 'system_settings.json';
 
 // --- จัดการ AJAX Request (บันทึกอัตโนมัติ) ---
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajax_action']) && $_POST['ajax_action'] == 'update_otp') {
-    $otp_status = (isset($_POST['otp_enabled']) && $_POST['otp_enabled'] === 'true') ? '1' : '0';
-    
-    $data = ['otp_enabled' => $otp_status];
-    if (file_put_contents($settings_file, json_encode($data))) {
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajax_action'])) {
+    // อ่านค่าเดิมก่อน (เพื่อไม่ให้ทับค่าอื่น)
+    $current_data = [];
+    if (file_exists($settings_file)) {
+        $current_data = json_decode(file_get_contents($settings_file), true);
+    }
+
+    if ($_POST['ajax_action'] == 'update_otp') {
+        $otp_status = (isset($_POST['otp_enabled']) && $_POST['otp_enabled'] === 'true') ? '1' : '0';
+        $current_data['otp_enabled'] = $otp_status;
+    } elseif ($_POST['ajax_action'] == 'update_first_login') {
+        $first_login_status = (isset($_POST['first_login_enabled']) && $_POST['first_login_enabled'] === 'true') ? '1' : '0';
+        $current_data['first_login_enabled'] = $first_login_status;
+    }
+
+    if (file_put_contents($settings_file, json_encode($current_data))) {
         echo json_encode(['status' => 'success']);
     } else {
         echo json_encode(['status' => 'error']);
@@ -38,10 +49,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajax_action']) && $_PO
 
 // --- ดึงค่าปัจจุบันมาแสดง ---
 $current_otp = '1'; // ค่าเริ่มต้น
+$current_first_login = '1'; // ค่าเริ่มต้น
 if (file_exists($settings_file)) {
     $data = json_decode(file_get_contents($settings_file), true);
     if (isset($data['otp_enabled'])) {
         $current_otp = $data['otp_enabled'];
+    }
+    if (isset($data['first_login_enabled'])) {
+        $current_first_login = $data['first_login_enabled'];
     }
 }
 ?>
@@ -55,14 +70,7 @@ if (file_exists($settings_file)) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body { font-family: 'Sarabun', sans-serif; background-color: #f8f9fc; }
-        .navbar { background: linear-gradient(135deg, #4e73df 0%, #224abe 100%); }
-        .card-settings { border: none; border-radius: 15px; box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1); }
-        .form-check-input:checked { background-color: #1cc88a; border-color: #1cc88a; }
-        .form-switch .form-check-input { width: 3em; height: 1.5em; cursor: pointer; }
-        .status-label { font-weight: 600; margin-left: 10px; vertical-align: middle; }
-    </style>
+    <link rel="stylesheet" href="css/admin_system_settings.css">
 </head>
 <body class="d-flex flex-column min-vh-100">
     <nav class="navbar navbar-expand-lg navbar-dark mb-5 shadow-sm">
@@ -92,6 +100,21 @@ if (file_exists($settings_file)) {
                                 <input class="form-check-input" type="checkbox" id="otpSwitch" <?php echo ($current_otp == '1') ? 'checked' : ''; ?>>
                                 <label class="form-check-label status-label" for="otpSwitch" id="otpLabel">
                                     <?php echo ($current_otp == '1') ? '<span class="text-success">เปิดใช้งาน</span>' : '<span class="text-secondary">ปิดใช้งาน</span>'; ?>
+                                </label>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div>
+                                <h6 class="fw-bold mb-1"><i class="fas fa-key me-2 text-danger"></i>บังคับเปลี่ยนรหัสผ่านครั้งแรก</h6>
+                                <p class="text-muted small mb-0">บังคับให้ผู้ใช้ต้องตั้งรหัสผ่านใหม่เมื่อเข้าสู่ระบบครั้งแรก</p>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="firstLoginSwitch" <?php echo ($current_first_login == '1') ? 'checked' : ''; ?>>
+                                <label class="form-check-label status-label" for="firstLoginSwitch" id="firstLoginLabel">
+                                    <?php echo ($current_first_login == '1') ? '<span class="text-success">เปิดใช้งาน</span>' : '<span class="text-secondary">ปิดใช้งาน</span>'; ?>
                                 </label>
                             </div>
                         </div>
@@ -135,6 +158,42 @@ if (file_exists($settings_file)) {
             const formData = new FormData();
             formData.append('ajax_action', 'update_otp');
             formData.append('otp_enabled', isChecked);
+
+            fetch('admin_system_settings.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    statusDiv.innerHTML = '<span class="text-success"><i class="fas fa-check"></i> บันทึกเรียบร้อย</span>';
+                    setTimeout(() => { statusDiv.innerHTML = ''; }, 2000);
+                } else {
+                    statusDiv.innerHTML = '<span class="text-danger">บันทึกไม่สำเร็จ</span>';
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                statusDiv.innerHTML = '<span class="text-danger">เกิดข้อผิดพลาดในการเชื่อมต่อ</span>';
+            });
+        });
+
+        document.getElementById('firstLoginSwitch').addEventListener('change', function() {
+            const isChecked = this.checked;
+            const label = document.getElementById('firstLoginLabel');
+            const statusDiv = document.getElementById('saveStatus');
+            
+            if(isChecked) {
+                label.innerHTML = '<span class="text-success">เปิดใช้งาน</span>';
+            } else {
+                label.innerHTML = '<span class="text-secondary">ปิดใช้งาน</span>';
+            }
+
+            statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
+
+            const formData = new FormData();
+            formData.append('ajax_action', 'update_first_login');
+            formData.append('first_login_enabled', isChecked);
 
             fetch('admin_system_settings.php', {
                 method: 'POST',

@@ -1,0 +1,81 @@
+body {
+    font-family: 'Sarabun', sans-serif;
+    background-color: #f8f9fc;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.navbar {
+    background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
+}
+.main-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+}
+.menu-card {
+    border: none;
+    border-radius: 20px;
+    background: white;
+    padding: 40px 20px;
+    text-align: center;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+    height: 100%;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    position: relative;
+    overflow: hidden;
+}
+.menu-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 15px 30px rgba(78, 115, 223, 0.2);
+    color: inherit;
+}
+.menu-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 5px;
+    background: #e3e6f0;
+    transition: 0.3s;
+}
+.menu-card:hover::before {
+    height: 10px;
+}
+/* สีแถบด้านบนของแต่ละการ์ด */
+.card-settings:hover::before { background: #f6c23e; } /* สีเหลือง */
+.card-users:hover::before { background: #4e73df; }    /* สีน้ำเงิน */
+.card-upload:hover::before { background: #1cc88a; }   /* สีเขียว */
+
+.icon-wrapper {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 25px;
+    font-size: 2.5rem;
+    transition: 0.3s;
+}
+.card-settings .icon-wrapper { background: #fff7d6; color: #f6c23e; }
+.card-users .icon-wrapper { background: #e6edfc; color: #4e73df; }
+.card-upload .icon-wrapper { background: #e0f7ef; color: #1cc88a; }
+
+.menu-title {
+    font-weight: 600;
+    font-size: 1.25rem;
+    margin-bottom: 10px;
+    color: #2c3e50;
+}
+.menu-desc {
+    font-size: 0.9rem;
+    color: #858796;
+    line-height: 1.5;
+}

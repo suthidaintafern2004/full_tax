@@ -3,113 +3,58 @@ session_start();
 require_once 'config.php';
 require_once 'send_otp_mail.php';
 
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
-require 'PHPMailer/src/Exception.php';
-require 'PHPMailer/src/PHPMailer.php';
-require 'PHPMailer/src/SMTP.php';
-
-// ตรวจสอบการตั้งค่า OTP
-$use_otp = true;
-$settings_file = 'system_settings.json';
-if (file_exists($settings_file)) {
-    $data = json_decode(file_get_contents($settings_file), true);
-    if (isset($data['otp_enabled'])) $use_otp = ($data['otp_enabled'] == '1');
-}
-
-if (!$use_otp) {
-    die('<div class="container mt-5 text-center"><div class="alert alert-danger">ระบบกู้คืนรหัสผ่านปิดใช้งานอยู่</div><a href="login.php">กลับหน้าเข้าสู่ระบบ</a></div>');
-}
-
+$step = $_SESSION['fp_step'] ?? 'check_pid';
 $error = "";
 $success = "";
-$show_otp_modal = false;
-$step = $_SESSION['fp_step'] ?? 'check_user';
 
-// 1. ขั้นตอนส่ง OTP
-if (isset($_POST['action']) && $_POST['action'] == 'request_otp') {
-    $pid = mysqli_real_escape_string($conn, $_POST['pid']);
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
+if (isset($_GET['reset'])) {
+    session_destroy();
+    header("Location: forgot_password.php");
+    exit();
+}
 
-    // ตรวจสอบว่าเลขบัตรและอีเมลตรงกับในระบบไหม
-    $sql = "SELECT m.email FROM users u JOIN member m ON u.username = m.pid WHERE u.username = ? AND m.email = ?";
-    $stmt = mysqli_prepare($conn, $sql);
-    mysqli_stmt_bind_param($stmt, "ss", $pid, $email);
-    mysqli_stmt_execute($stmt);
-    $result = mysqli_stmt_get_result($stmt);
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
-    if (mysqli_num_rows($result) > 0) {
-        $otp_code = rand(100000, 999999);
-        $ref_code = substr(str_shuffle("ABCDEFGHJKLMNPQRSTUVWXYZ"), 0, 4);
+    if ($_POST['action'] == 'check_pid') {
+        $pid = trim($_POST['pid']);
+        $stmt = mysqli_prepare($conn, "SELECT email FROM member WHERE pid=?");
+        mysqli_stmt_bind_param($stmt, "s", $pid);
+        mysqli_stmt_execute($stmt);
+        $res = mysqli_stmt_get_result($stmt);
 
-        $_SESSION['fp_data'] = [
-            'pid' => $pid,
-            'email' => $email,
-            'code' => $otp_code,
-            'ref' => $ref_code,
-            'expiry' => time() + 300
-        ];
-
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host       = 'smtp.gmail.com';
-            $mail->SMTPAuth   = true;
-            $mail->Username   = 'tax_finance@sesalpglpn.go.th';
-            $mail->Password   = 'hgtxhqcpmmnuahng';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port       = 587;
-            $mail->CharSet    = 'UTF-8';
-
-            $mail->setFrom('tax_finance@sesalpglpn.go.th', 'ระบบกู้คืนรหัสผ่าน SESALPGLPN');
-            $mail->addAddress($email);
-            $mail->isHTML(true);
-            $mail->Subject = "รหัสยืนยันการเปลี่ยนรหัสผ่าน (Ref: $ref_code)";
-            $mail->Body    = "รหัสยืนยันของคุณคือ: <h2 style='color:red;'>$otp_code</h2>";
-
-            if ($mail->send()) {
-                $show_otp_modal = true;
+        if ($row = mysqli_fetch_assoc($res)) {
+            $_SESSION['fp_data']['pid'] = $pid;
+            if ($row['email']) {
+                $otp = rand(100000, 999999);
+                $ref = substr(str_shuffle("ABCDEFGHJKLMNPQRSTUVWXYZ"), 0, 4);
+                sendOtpEmail($row['email'], $otp, 'forgot_password', $ref);
+                $_SESSION['fp_data'] += ['otp' => $otp, 'ref' => $ref, 'expiry' => time() + 300];
+                $_SESSION['fp_step'] = 'verify_otp';
+                header("Location: forgot_password.php");
+                exit();
+            } else {
+                $_SESSION['fp_step'] = 'input_email';
             }
-        } catch (Exception $e) {
-            $error = "ส่งอีเมลไม่สำเร็จ: " . $mail->ErrorInfo;
-        }
-    } else {
-        $error = "ข้อมูลเลขบัตรประชาชนหรืออีเมลไม่ถูกต้อง";
-    }
-}
-
-// 2. ขั้นตอนยืนยัน OTP
-if (isset($_POST['action']) && $_POST['action'] == 'verify_otp') {
-    $input_otp = implode('', $_POST['otp_digits']);
-    $fp_data = $_SESSION['fp_data'] ?? null;
-
-    if ($fp_data && $input_otp == $fp_data['code']) {
-        $_SESSION['fp_step'] = 'reset_password';
-        $step = 'reset_password';
-    } else {
-        $error = "รหัส OTP ไม่ถูกต้อง";
-        $show_otp_modal = true;
-    }
-}
-
-// 3. ขั้นตอนบันทึกรหัสผ่านใหม่
-if (isset($_POST['action']) && $_POST['action'] == 'save_password') {
-    $new_pass = $_POST['new_password'];
-    $conf_pass = $_POST['confirm_password'];
-    $pid = $_SESSION['fp_data']['pid'];
-
-    if ($new_pass === $conf_pass && strlen($new_pass) >= 8) {
-        $stmt = mysqli_prepare($conn, "UPDATE users SET password = ? WHERE username = ?");
-        mysqli_stmt_bind_param($stmt, "ss", $new_pass, $pid);
-        if (mysqli_stmt_execute($stmt)) {
-            $success = "เปลี่ยนรหัสผ่านสำเร็จแล้ว!";
-            unset($_SESSION['fp_data']);
-            unset($_SESSION['fp_step']);
-            echo "<script>setTimeout(function(){ window.location.href='login.php'; }, 2000);</script>";
-        }
-    } else {
-        $error = "รหัสผ่านไม่ตรงกันหรือสั้นเกินไป";
+        } else $error = "ไม่พบผู้ใช้";
+    } elseif ($_POST['action'] == 'send_otp_new') {
+        $email = $_POST['email'];
+        $otp = rand(100000, 999999);
+        $ref = substr(str_shuffle("ABCDEFGHJKLMNPQRSTUVWXYZ"), 0, 4);
+        sendOtpEmail($email, $otp, 'forgot_password', $ref);
+        $_SESSION['fp_data'] += ['email' => $email, 'otp' => $otp, 'ref' => $ref, 'expiry' => time() + 300];
+        $_SESSION['fp_step'] = 'verify_otp';
+        header("Location: forgot_password.php");
+        exit();
+    } elseif ($_POST['action'] == 'verify_otp') {
+        if ($_POST['otp_input'] == $_SESSION['fp_data']['otp']) {
+            $_SESSION['fp_step'] = 'reset_password';
+        } else $error = "OTP ไม่ถูกต้อง";
+    } elseif ($_POST['action'] == 'save_password') {
+        $pid = $_SESSION['fp_data']['pid'];
+        $pass = $_POST['new_password'];
+        mysqli_query($conn, "UPDATE users SET password='$pass' WHERE username='$pid'");
+        session_destroy();
+        $success = "เปลี่ยนรหัสผ่านสำเร็จ";
     }
 }
 ?>
@@ -123,60 +68,7 @@ if (isset($_POST['action']) && $_POST['action'] == 'save_password') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            background: #f8f9fa;
-            font-family: 'Sarabun', sans-serif;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-        }
-
-        .fp-card {
-            border: none;
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-        }
-
-        .fp-header {
-            background: #eeb42a;
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
-
-        .btn-gold {
-            background: #eeb42a;
-            color: white;
-            border-radius: 50px;
-            font-weight: 600;
-            padding: 12px;
-            border: none;
-        }
-
-        .btn-gold:hover {
-            background: #d4a017;
-            color: white;
-        }
-
-        .otp-digit {
-            width: 45px;
-            height: 50px;
-            text-align: center;
-            font-size: 20px;
-            font-weight: bold;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            margin: 0 5px;
-        }
-
-        .otp-digit:focus {
-            border-color: #eeb42a;
-            outline: none;
-            box-shadow: 0 0 5px rgba(238, 180, 42, 0.3);
-        }
-    </style>
+    <link rel="stylesheet" href="css/forgot_password.css">
 </head>
 
 <body>

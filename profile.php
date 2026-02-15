@@ -1,13 +1,7 @@
 <?php
 session_start();
 require_once 'config.php';
-
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
-require 'PHPMailer/src/Exception.php';
-require 'PHPMailer/src/PHPMailer.php';
-require 'PHPMailer/src/SMTP.php';
+require_once 'send_otp_mail.php';
 
 if (!isset($_SESSION['username'])) {
     header("Location: login.php");
@@ -102,25 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $otp_code = rand(100000, 999999);
                 $ref_code = substr(str_shuffle("ABCDEFGHJKLMNPQRSTUVWXYZ"), 0, 4);
                 
-                $mail = new PHPMailer(true);
-                try {
-                    $mail->isSMTP();
-                    $mail->Host       = 'smtp.gmail.com';
-                    $mail->SMTPAuth   = true;
-                    $mail->Username   = 'tax_finance@sesalpglpn.go.th';
-                    $mail->Password   = 'hgtxhqcpmmnuahng';
-                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-                    $mail->Port       = 587;
-                    $mail->CharSet    = 'UTF-8';
-
-                    $mail->setFrom('tax_finance@sesalpglpn.go.th', 'ระบบภาษี SESALPGLPN');
-                    $mail->addAddress($new_email);
-
-                    $mail->isHTML(true);
-                    $mail->Subject = "รหัสยืนยันการเปลี่ยนอีเมล (Ref: $ref_code)";
-                    $mail->Body    = "รหัสยืนยันของคุณคือ: <h2 style='color:blue;'>$otp_code</h2>";
-
-                    $mail->send();
+                if (sendOtpEmail($new_email, $otp_code, 'change_email', $ref_code)) {
                     $_SESSION['email_change_otp'] = [
                         'code' => $otp_code,
                         'email' => $new_email,
@@ -129,8 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         'last_req' => time() // เก็บเวลาที่ขอล่าสุด
                     ];
                     $show_otp_modal = true;
-                } catch (Exception $e) {
-                    $error = "ส่งอีเมลไม่สำเร็จ: " . $mail->ErrorInfo;
+                } else {
+                    $error = "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
                 }
             } else {
                 // กรณีปิด OTP ไม่อนุญาตให้เปลี่ยนเอง (ป้องกันทาง Backend)
@@ -152,26 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $otp_code = rand(100000, 999999);
                     $ref_code = substr(str_shuffle("ABCDEFGHJKLMNPQRSTUVWXYZ"), 0, 4);
                     
-                    $mail = new PHPMailer(true);
-                    try {
-                        $mail->isSMTP();
-                        $mail->Host       = 'smtp.gmail.com';
-                        $mail->SMTPAuth   = true;
-                        $mail->Username   = 'tax_finance@sesalpglpn.go.th';
-                        $mail->Password   = 'hgtxhqcpmmnuahng';
-                        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-                        $mail->Port       = 587;
-                        $mail->CharSet    = 'UTF-8';
-
-                        $mail->setFrom('tax_finance@sesalpglpn.go.th', 'ระบบภาษี SESALPGLPN');
-                        $mail->addAddress($new_email);
-
-                        $mail->isHTML(true);
-                        $mail->Subject = "รหัสยืนยันการเปลี่ยนอีเมล (Ref: $ref_code)";
-                        $mail->Body    = "รหัสยืนยันใหม่ของคุณคือ: <h2 style='color:blue;'>$otp_code</h2>";
-
-                        $mail->send();
-                        
+                    if (sendOtpEmail($new_email, $otp_code, 'change_email', $ref_code)) {
                         // อัปเดต Session (ล้างค่าเดิมโดยการทับค่าใหม่)
                         $_SESSION['email_change_otp']['code'] = $otp_code;
                         $_SESSION['email_change_otp']['ref'] = $ref_code;
@@ -179,8 +136,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $_SESSION['email_change_otp']['last_req'] = time();
                         
                         $show_otp_modal = true;
-                    } catch (Exception $e) {
-                        $error = "ส่งอีเมลไม่สำเร็จ: " . $mail->ErrorInfo;
+                    } else {
+                        $error = "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
                     }
                 } else {
                     $error = "ระบบ OTP ปิดการใช้งานอยู่";
@@ -300,22 +257,7 @@ $show_email_form = (isset($_POST['request_email_otp']) || isset($_SESSION['email
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            font-family: 'Sarabun', sans-serif;
-            background-color: #f8f9fc;
-        }
-
-        .card {
-            border: none;
-            border-radius: 1rem;
-            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
-        }
-
-        .navbar {
-            background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
-        }
-    </style>
+    <link rel="stylesheet" href="css/profile.css">
 </head>
 
 <body class="d-flex flex-column min-vh-100">

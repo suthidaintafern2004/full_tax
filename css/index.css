@@ -1,0 +1,61 @@
+:root {
+    --primary-color: #4e73df;
+}
+
+body {
+    font-family: 'Sarabun', sans-serif;
+    min-height: 100vh;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: url('../images/bg.jpg') no-repeat center center fixed;
+    background-size: cover;
+    filter: blur(8px);
+    z-index: -1;
+    transform: scale(1.1);
+}
+
+.navbar {
+    background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
+}
+
+/* ขยายหน้าจอให้กว้างขึ้น */
+.content-wrapper {
+    max-width: 1320px;
+    margin: 0 auto;
+    width: 95%;
+}
+
+.card {
+    border: none;
+    border-radius: 12px;
+}
+
+.amount-text {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
+.doc-section-title {
+    border-left: 4px solid var(--primary-color);
+    padding-left: 10px;
+    margin: 20px 0 15px 0;
+    font-weight: 600;
+}
+.pagination .page-link {
+    border-radius: 50px !important;
+    margin: 0 4px;
+    border: none;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    color: var(--primary-color);
+}
+.pagination .page-item.active .page-link {
+    background: var(--primary-color);
+    color: white;
+}

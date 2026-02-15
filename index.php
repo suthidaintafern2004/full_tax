@@ -9,16 +9,29 @@ if (!isset($_SESSION['username'])) {
 
 // 1. ตรวจสอบสถานะการเข้าใช้งานครั้งแรก
 $session_pid = $_SESSION['username'];
-$sql_check = "SELECT is_first_login FROM users WHERE username = ?";
-$stmt_check = mysqli_prepare($conn, $sql_check);
-mysqli_stmt_bind_param($stmt_check, "s", $session_pid);
-mysqli_stmt_execute($stmt_check);
-$res_check = mysqli_stmt_get_result($stmt_check);
-$user_status = mysqli_fetch_assoc($res_check);
 
-if ($user_status['is_first_login'] == 1) {
-    header("Location: setup_profile.php");
-    exit();
+// ตรวจสอบการตั้งค่าระบบ (เพิ่มใหม่)
+$settings_file = 'system_settings.json';
+$first_login_enabled = true; // ค่าเริ่มต้นเปิดใช้งาน
+if (file_exists($settings_file)) {
+    $data = json_decode(file_get_contents($settings_file), true);
+    if (isset($data['first_login_enabled'])) {
+        $first_login_enabled = ($data['first_login_enabled'] == '1');
+    }
+}
+
+if ($first_login_enabled) {
+    $sql_check = "SELECT is_first_login FROM users WHERE username = ?";
+    $stmt_check = mysqli_prepare($conn, $sql_check);
+    mysqli_stmt_bind_param($stmt_check, "s", $session_pid);
+    mysqli_stmt_execute($stmt_check);
+    $res_check = mysqli_stmt_get_result($stmt_check);
+    $user_status = mysqli_fetch_assoc($res_check);
+
+    if ($user_status['is_first_login'] == 1) {
+        header("Location: setup_profile.php");
+        exit();
+    }
 }
 
 // 2. ตรวจสอบสิทธิ์ (Role)
@@ -192,69 +205,7 @@ $thai_months = [1 => 'มกราคม', 2 => 'กุมภาพันธ์'
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --primary-color: #4e73df;
-        }
-
-        body {
-            font-family: 'Sarabun', sans-serif;
-            min-height: 100vh;
-        }
-
-        body::before {
-            content: "";
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: url('images/bg.jpg') no-repeat center center fixed;
-            background-size: cover;
-            filter: blur(8px);
-            z-index: -1;
-            transform: scale(1.1);
-        }
-
-        .navbar {
-            background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
-        }
-
-        /* ขยายหน้าจอให้กว้างขึ้น */
-        .content-wrapper {
-            max-width: 1320px;
-            margin: 0 auto;
-            width: 95%;
-        }
-
-        .card {
-            border: none;
-            border-radius: 12px;
-        }
-
-        .amount-text {
-            font-family: 'Courier New', monospace;
-            font-weight: bold;
-        }
-
-        .doc-section-title {
-            border-left: 4px solid var(--primary-color);
-            padding-left: 10px;
-            margin: 20px 0 15px 0;
-            font-weight: 600;
-        }
-        .pagination .page-link {
-            border-radius: 50px !important;
-            margin: 0 4px;
-            border: none;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-            color: var(--primary-color);
-        }
-        .pagination .page-item.active .page-link {
-            background: var(--primary-color);
-            color: white;
-        }
-    </style>
+    <link rel="stylesheet" href="css/index.css">
 </head>
 
 <body class="d-flex flex-column min-vh-100">
